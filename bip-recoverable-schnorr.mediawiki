@@ -1,0 +1,353 @@
+<pre>
+  BIP: XXX
+  Layer: Applications
+  Title: Recoverable Schnorr for Public-Key Commitments
+  Authors: Boris Nagaev <bnagaev@gmail.com>
+           Conduition <conduition@proton.me>
+  Discussion: https://delvingbitcoin.org/t/public-key-recovery-for-ec-leaves-in-p2mr-bip-360/2603
+  Status: Draft
+  Type: Specification
+  License: BSD-2-Clause
+  Requires: 340
+</pre>
+
+==Introduction==
+
+===Abstract===
+
+This document specifies a variant of [[bip-0340.mediawiki|BIP340]] Schnorr signatures where the EC public key is recovered from the signature and then checked against an application-defined public-key commitment.
+
+The signature format remains the 64-byte BIP340 format. Verification takes a 32-byte public-key commitment and opening data. The EC public key itself is recovered from the signature.
+
+===Copyright===
+
+This document is licensed under the 2-clause BSD license.
+
+===Motivation===
+
+Plain Schnorr supports key recovery from a signature, but BIP340-style verification normally does not, because of key prefixing. BIP340 puts the EC public key into the challenge hash. This prevents additive related-key attacks, but it also creates a circular dependency if the public key is supposed to be recovered from the signature.
+
+Some constructions want the public key to remain hidden until spend time, or want to commit to it through another commitment structure. Examples include output types which commit to a Merkle root containing an EC key, or output types which commit to the hash of a Taproot output key.
+
+This BIP specifies the reusable signature primitive for such constructions. It does not specify any consensus rule.
+
+==Design==
+
+This scheme follows BIP340 as closely as possible. It uses the same curve, group notation, 64-byte signature encoding, even-Y nonce convention, and tagged hash construction.
+
+The main difference is the challenge hash. BIP340 uses:
+
+<source>
+e = hash(R || P || m)
+</source>
+
+where, in BIP340, ''P'' is the x-only public key. This scheme uses:
+
+<source>
+e = hash(R || q || h || m)
+</source>
+
+where:
+
+* ''R'' is the public nonce point;
+* ''q'' is a 32-byte public-key commitment;
+* ''h'' is a 32-byte hash of the application-specific opening data;
+* ''m'' is the message being signed.
+
+The verifier computes ''e'' before knowing the EC public key. Mathematically, recovery is just the Schnorr verification equation solved for ''P'':
+
+: ''s⋅G = R + e⋅P''
+: ''P = e<sup>-1</sup>⋅(s⋅G - R)''
+
+The recovered public key point is accepted only if the opening data proves that it is the key committed by ''q''.
+
+The opening data is included in the challenge because a single commitment may intentionally have many valid openings. For example, a Merkle root commits to many leaves. Binding the signature only to the root would not bind it to a particular leaf path.
+
+==Specification==
+
+All notation, constants, and functions from BIP340 are used unless explicitly overridden here.
+
+In particular:
+
+* ''G'' is the secp256k1 base point.
+* ''n'' is the secp256k1 group order.
+* ''p'' is the secp256k1 field size.
+* ''bytes(x)'' for an integer is its 32-byte big-endian encoding.
+* ''bytes(P)'' for a point is ''bytes(x(P))''.
+* ''int(x)'' interprets a 32-byte array as a big-endian integer.
+* ''lift_x(x)'' returns the even-Y point with x-coordinate ''x'', or fails.
+* ''hash<sub>tag</sub>(x)'' is the BIP340 tagged hash construction.
+* ''cbytes(P)'', where ''P'' is a point for which ''not is_infinite(P)'', returns the 33-byte compressed encoding of ''P'': a byte ''0x02'' if ''has_even_y(P)'' and ''0x03'' otherwise, followed by ''bytes(P)''.
+
+The following tags are used:
+
+* ''RecSchnorr/aux'' for hashing auxiliary randomness before xoring it with the secret key.
+* ''RecSchnorr/opening'' for computing the 32-byte hash ''h'' of the opening data ''o''.
+* ''RecSchnorr/nonce'' for nonce generation.
+* ''RecSchnorr/challenge'' for computing the challenge scalar ''e''.
+
+===Public-key commitments and openings===
+
+Applications using this scheme define a deterministic function:
+
+<source>
+VerifyOpening(q, P, o) -> success or failure
+</source>
+
+where:
+
+* ''q'' is a 32-byte public-key commitment;
+* ''P'' is an EC public key point;
+* ''o'' is application-specific opening data.
+
+The function succeeds iff ''o'' proves that ''q'' commits to ''P''.
+
+This BIP does not define how ''q'' is computed. That is application-specific.
+
+For security, ''VerifyOpening'' must be binding for fixed ''(q, o)'': it must be infeasible to find two distinct public key points ''P<sub>1</sub>'' and ''P<sub>2</sub>'' such that both ''VerifyOpening(q, P<sub>1</sub>, o)'' and ''VerifyOpening(q, P<sub>2</sub>, o)'' succeed.
+
+Applications must also define a canonical byte serialization for ''o''. Verification uses that exact byte string.
+
+===Public Key Generation===
+
+This scheme signs for an EC public key point.
+
+The public key point corresponding to a secret key ''sk'' is:
+
+<source>
+P = PubPoint(sk)
+</source>
+
+where ''PubPoint(sk)'' is defined as:
+
+* Let ''d = int(sk)''.
+* Fail if ''d = 0'' or ''d &ge; n''.
+* Return ''d⋅G''.
+
+The public key point ''P'' does not have to be revealed directly. Instead, the application commits to it through ''q'' and opening data ''o''.
+
+===Signing===
+
+Inputs:
+
+* The secret key ''sk'': a 32-byte array.
+* The public-key commitment ''q'': a 32-byte array.
+* The opening data ''o'': a byte array.
+* The message ''m'': a byte array.
+* Auxiliary random data ''a'': a 32-byte array.
+* The application function ''VerifyOpening''.
+
+The signing algorithm below uses deterministic nonce derivation with auxiliary random data, following the synthetic nonce approach of BIP340. The auxiliary random data should be fresh randomness when available. If randomness is unavailable, it may be set to 32 zero bytes; this does not by itself compromise the scheme. Auxiliary randomness is a mitigation against side-channel attacks, fault attacks, and nonce-exfiltration attacks. Low-quality or predictable auxiliary data weakens that mitigation. The normal security properties, excluding such implementation attacks, do not depend on the quality of this randomness.
+
+The signing algorithm is:
+
+* Fail if ''q'' is not 32 bytes.
+* Let ''d = int(sk)''.
+* Fail if ''d = 0'' or ''d &ge; n''.
+* Let ''P = d⋅G''.
+* Fail if ''VerifyOpening(q, P, o)'' fails.
+* Let ''h = hash<sub>RecSchnorr/opening</sub>(o)''.
+* Let ''t'' be the byte-wise xor of ''bytes(d)'' and ''hash<sub>RecSchnorr/aux</sub>(a)''.
+* Let ''rand = hash<sub>RecSchnorr/nonce</sub>(t || cbytes(P) || q || h || m)''.
+* Let ''k' = int(rand) mod n''.
+* Fail if ''k' = 0''.
+* Let ''R = k'⋅G''.
+* Let ''k = k' '' if ''has_even_y(R)'', otherwise let ''k = n - k' ''.
+* Let ''e = int(hash<sub>RecSchnorr/challenge</sub>(bytes(R) || q || h || m)) mod n''.
+* Fail if ''e = 0''.
+* Let ''sig = bytes(R) || bytes((k + ed) mod n)''.
+* If ''Verify(q, o, m, sig)'' with the same ''VerifyOpening'' function returns failure, abort.
+* Return ''sig''.
+
+The nonce derivation is deliberately different from BIP340 nonce derivation. Reusing the same nonce with different challenges leaks the secret key, and this scheme's challenge depends on ''q'' and ''h'' in addition to ''m''. Therefore the nonce hash uses different tags and includes ''cbytes(P)'', ''q'', ''h'', and ''m''. This prevents accidental nonce reuse between BIP340 and this scheme, and between different openings of the same public-key commitment.
+
+The use of ''cbytes(P)'' in the nonce hash is only an internal canonical encoding of the public key point being signed for. It does not require applications to commit to the compressed public key encoding; an application may still define ''VerifyOpening'' over another encoding, such as an x-only key with an even-Y check.
+
+===Verification and public key recovery===
+
+Inputs:
+
+* The public-key commitment ''q'': a 32-byte array.
+* The opening data ''o'': a byte array.
+* The message ''m'': a byte array.
+* A signature ''sig'': a 64-byte array.
+* The application function ''VerifyOpening''.
+
+The verification algorithm ''Verify(q, o, m, sig)'' is:
+
+* Fail if ''q'' is not 32 bytes.
+* Fail if ''sig'' is not 64 bytes.
+* Let ''h = hash<sub>RecSchnorr/opening</sub>(o)''.
+* Let ''r = int(sig[0:32])''; fail if ''r &ge; p''.
+* Let ''s = int(sig[32:64])''; fail if ''s &ge; n''.
+* Let ''R = lift_x(r)''; fail if that fails.
+* Let ''e = int(hash<sub>RecSchnorr/challenge</sub>(bytes(R) || q || h || m)) mod n''.
+* Fail if ''e = 0''.
+* Let ''P = e<sup>-1</sup>⋅(s⋅G - R)''.
+* The inverse in the previous step is taken modulo ''n''.
+* Fail if ''is_infinite(P)''.
+* Fail if ''VerifyOpening(q, P, o)'' fails.
+* Return ''P''.
+
+For every valid secret key ''sk'', commitment ''q'', opening data ''o'', and message ''m'', if ''VerifyOpening(q, PubPoint(sk), o)'' succeeds, then ''Verify(q, o, m, Sign(sk, q, o, m))'' will return ''PubPoint(sk)''.
+
+==Usage Considerations==
+
+===Opening data is part of the signing context===
+
+The opening data ''o'' is part of the signing context, through ''h = hash<sub>RecSchnorr/opening</sub>(o)''. It is not free-form metadata you can vary after the fact.
+
+The signer needs to know the exact byte string ''o'' before signing and must check that it opens ''q'' to their own public key. Signing for the wrong opening data can either produce an invalid signature or, if nonces are reused across openings, leak the secret key.
+
+===Do not reuse deterministic nonces across schemes===
+
+If the same nonce is used for two challenges ''e<sub>1</sub>'' and ''e<sub>2</sub>'', the secret key can be recovered from:
+
+: ''s<sub>1</sub> = k + e<sub>1</sub>⋅d''
+: ''s<sub>2</sub> = k + e<sub>2</sub>⋅d''
+: ''d = (s<sub>1</sub> - s<sub>2</sub>) / (e<sub>1</sub> - e<sub>2</sub>) mod n''
+
+The signing algorithm above includes ''cbytes(P)'', ''q'', ''h'', and ''m'' in the nonce hash and uses scheme-specific tags. Implementations using another nonce generation method must provide the same protection.
+
+===Public key encoding and parity===
+
+Applications decide how the recovered point ''P'' is encoded or constrained.
+
+An application which commits to a compressed public key can define ''VerifyOpening'' over ''cbytes(P)''. This commits to the parity of ''P''.
+
+An application which commits to an x-only public key must reject recovered points with odd Y coordinate, or otherwise define the commitment to the even-Y representative. If it accepts both ''P'' and ''-P'' for the same ''(q, o)'', the opening relation is not binding.
+
+When signing for an application that requires even-Y public keys, the signer must use the scalar whose public key point satisfies that rule. This may require replacing ''d'' with ''n - d'' before invoking the signing algorithm.
+
+===Application domain separation===
+
+Applications must make sure that signatures for one application cannot be replayed as signatures for another application using the same ''q'', ''o'', and ''m'' values.
+
+In transaction signature applications, the message ''m'' normally commits to the output type, script, or other consensus context. If that is not true, the application should include an application or version identifier in ''o'' or in the construction of ''q''.
+
+===Applications===
+
+Applications instantiate ''VerifyOpening''.
+
+For a Merkle-root construction, ''q'' could be the Merkle root, ''o'' could be a leaf version and Merkle path, and ''VerifyOpening'' would recompute the root from the recovered public key point.
+
+For a hash-of-key construction, ''q'' could be a hash of the recovered public key point, and ''o'' could be empty.
+
+These are only examples. This BIP does not specify either construction.
+
+==Security==
+
+This section gives a proof sketch. A full formal proof is still required before using this scheme in consensus rules.
+
+The sketch uses an intermediate scheme called ''labeled Schnorr''. It is the usual [http://publikationen.ub.uni-frankfurt.de/opus4/files/4280/schnorr.pdf Schnorr signature] scheme, but with an explicit public label ''L'' in the challenge:
+
+<source>
+e = H(R || L || m)
+s = k + e⋅d
+</source>
+
+Verification for public key point ''P = d⋅G'' checks:
+
+<source>
+s⋅G = R + e⋅P
+</source>
+
+The proof fact used here is the standard Schnorr reduction: an attack which forges Schnorr signatures can be converted into an attack which solves discrete logarithms. See [https://www.di.ens.fr/~pointche/Documents/Papers/2000_joc.pdf Pointcheval and Stern], Section 3.2.2, Theorem 4, for the Schnorr application of the Forking Lemma, and [https://eprint.iacr.org/2016/191 Kiltz, Masny, and Pan], Section 5.1.2, Lemma 5.7, for a modern Schnorr SUF-CMA statement from DLOG.
+
+The label ''L'' is simply part of the challenge input, like the public-key prefix in BIP340. In the random oracle model, the reduction obtains two valid transcripts with the same nonce point ''R'' but two different challenges ''e'' and ''e' '':
+
+: ''s = k + e⋅d''
+: ''s' = k + e'⋅d''
+
+From these equations, the reduction extracts the secret key:
+
+: ''d = (s - s')⋅(e - e')<sup>-1</sup> mod n''
+
+In this BIP, the label is:
+
+: ''L = q || hash<sub>RecSchnorr/opening</sub>(o)''
+
+The new assumption is that the application-defined opening relation is binding. For a fixed ''(q, o)'', there should be at most one public key point ''P'' accepted by ''VerifyOpening''. If an attacker produces two different accepted public key points for the same ''(q, o)'', the application commitment has failed.
+
+Now assume there is an attacker ''A'' against the following single-key game for this scheme. The target public key point is ''P''. Signing queries are answered only for openings ''(q, o)'' where ''VerifyOpening(q, P, o)'' succeeds. A forgery must also be for an opening ''(q, o)'' where ''VerifyOpening(q, P, o)'' succeeds.
+
+Construct an attacker ''B'' against labeled Schnorr as follows:
+
+* ''B'' receives the labeled-Schnorr public key point ''P''.
+* When ''A'' asks for a signature for ''(q, o, m)'', ''B'' checks ''VerifyOpening(q, P, o)''. If it fails, ''B'' returns failure, as an honest signer would.
+* Otherwise ''B'' computes ''L = q || hash<sub>RecSchnorr/opening</sub>(o)'', asks its labeled-Schnorr signing oracle for a signature on ''(L, m)'', and returns that signature to ''A''.
+* When ''A'' outputs a forgery ''(q, o, m, sig)'', ''B'' first checks ''VerifyOpening(q, P, o)''. If it fails, this is not a forgery in the single-key game.
+* ''B'' then runs this BIP's verification algorithm. If verification fails, ''B'' fails.
+* If verification succeeds and recovers ''P<sub>r</sub>'', then ''B'' checks whether ''P<sub>r</sub> = P''. If not, then both ''VerifyOpening(q, P, o)'' and ''VerifyOpening(q, P<sub>r</sub>, o)'' succeed, so ''A'' has produced a binding failure for ''VerifyOpening''.
+* Otherwise ''P<sub>r</sub> = P''. Then the same signature satisfies the labeled-Schnorr verification equation for public key point ''P'', label ''L = q || hash<sub>RecSchnorr/opening</sub>(o)'', and message ''m''.
+* If ''A'' did not request a signature for this ''(L, m)'' before, or if it outputs a different valid signature for a previously requested ''(L, m)'', then ''B'' has a labeled-Schnorr forgery under the usual strong unforgeability notion used by BIP340.
+* If ''A'' did request this ''(L, m)'' before but not this ''(q, o, m)'', then two different openings produced the same label. That requires either a collision in ''hash<sub>RecSchnorr/opening</sub>'' or non-canonical opening encodings.
+
+So a successful forgery against this scheme gives either:
+
+* a labeled-Schnorr forgery under the unique public key point opened by ''(q, o)''; or
+* a violation of the binding property of ''VerifyOpening''.
+
+The recovery step itself adds no new algebraic assumption. Once ''e'' is fixed and nonzero, recovery is just the Schnorr verification equation solved for ''P'':
+
+: ''s⋅G = R + e⋅P''
+: ''P = e<sup>-1</sup>⋅(s⋅G - R)''
+
+===Related-key attacks===
+
+Unprefixed Schnorr signatures are vulnerable to additive related-key attacks. Given a signature for ''P'', a third party can transform it into a signature for ''P + a⋅G'' if the challenge does not depend on the public key.
+
+BIP340 prevents this by putting ''P'' into the challenge hash. This scheme instead puts the commitment label:
+
+: ''q || hash<sub>RecSchnorr/opening</sub>(o)''
+
+into the challenge hash.
+
+This label must identify the committed public key uniquely, up to the binding security of the application commitment.
+
+If two openings use different labels, then their challenge inputs differ. It is enough for ''q'', ''h'', or both to be different:
+
+<source>
+L  = q  || h
+L' = q' || h'
+e  = H(R || L  || m)
+e' = H(R || L' || m)
+</source>
+
+So the additive trick no longer works. Say an attacker has a signature ''(R, s)'' for ''P'' and wants to turn it into one for a related key ''P' = P + a⋅G'', reusing the same ''R''. They would need:
+
+<source>
+s' = k + e'⋅(d + a)
+</source>
+
+They already have:
+
+<source>
+s = k + e⋅d
+</source>
+
+so they would have to compute ''(e' - e)⋅d''. The two openings give different challenge inputs, so ''e' = e'' only with negligible probability in the random oracle model. Computing that product needs the secret key ''d'', which they do not have.
+
+If two different openings have the same label, then either ''q'' is the same and ''hash<sub>RecSchnorr/opening</sub>(o)'' collided, or the byte encodings are not canonical. Applications must avoid both cases.
+
+===Limitations===
+
+This BIP does not prove security of arbitrary applications. Each application must define and analyze ''VerifyOpening''.
+
+This BIP also does not prove security of multi-party signing protocols such as MuSig2 or FROST under this modified challenge. The Schnorr equation remains linear, but multi-party protocols require separate definitions and proofs.
+
+This BIP does not define batch verification. Batch verification of BIP340 signatures relies on public keys being explicit verifier inputs. In this scheme, public keys are outputs of verification. Applications may define optional side data or other verification shortcuts, but consensus-critical use of this scheme must not depend on such data being available. Applications using this scheme should not expect the validation or initial block download speedups that normal BIP340 batch verification can provide.
+
+==Backwards Compatibility==
+
+This scheme is not compatible with BIP340 verification. A valid signature under this scheme is generally not a valid BIP340 signature for the recovered public key, because the challenge hash is different.
+
+The distinct ''RecSchnorr/challenge'' tag gives domain separation from BIP340 signatures.
+
+The signature encoding is the same 64-byte encoding as BIP340. Implementations must not infer the signature scheme from the signature length alone.
+
+==Test Vectors and Reference Code==
+
+For development and testing, this BIP provides a [[bip-recoverable-schnorr/test-vectors.csv|collection of test vectors in CSV format]] and a naive, highly inefficient, non-constant time [[bip-recoverable-schnorr/reference.py|Python reference implementation]].
+
+The test vectors use two simple ''VerifyOpening'' instantiations: one commitment to ''cbytes(P)'' with empty opening data, and one commitment to ''cbytes(P) || o''. These instantiations are only for testing the generic signature scheme. Applications must define their own opening relation and provide application-specific test vectors.
