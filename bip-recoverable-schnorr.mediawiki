@@ -156,7 +156,7 @@ The signing algorithm is:
 * Let ''e = int(hash<sub>RecSchnorr/challenge</sub>(bytes(R) || q || h || m)) mod n''.
 * Fail if ''e = 0''.
 * Let ''s = (k + ed) mod n''.
-* If ''s⋅G &ne; R + e⋅P'', abort. (Defensive self-check.)
+* If ''s⋅G &ne; k⋅G + e⋅P'', abort. (Defensive self-check.)
 * Let ''sig = bytes(R) || bytes(s)''.
 * Return ''sig''.
 

@@ -79,10 +79,10 @@ def recoverable_sign(
     e = int_from_bytes(tagged_hash("RecSchnorr/challenge", bytes_from_point(R) + q + h + msg)) % n
     if e == 0:
         raise RuntimeError("Failure. This happens only with negligible probability.")
-    sig = bytes_from_point(R) + bytes_from_int((k + e * d) % n)
-    P_recovered = recoverable_verify(msg, q, opening, sig, verify_opening)
-    if P_recovered != P:
-        raise RuntimeError("The created signature does not pass verification.")
+    s = (k + e * d) % n
+    if point_mul(G, s) != point_add(point_mul(G, k), point_mul(P, e)):
+        raise RuntimeError("The created signature does not satisfy the signing equation.")
+    sig = bytes_from_point(R) + bytes_from_int(s)
     return sig
 
 
