@@ -155,8 +155,9 @@ The signing algorithm is:
 * Let ''k = k' '' if ''has_even_y(R)'', otherwise let ''k = n - k' ''.
 * Let ''e = int(hash<sub>RecSchnorr/challenge</sub>(bytes(R) || q || h || m)) mod n''.
 * Fail if ''e = 0''.
-* Let ''sig = bytes(R) || bytes((k + ed) mod n)''.
-* If ''Verify(q, o, m, sig)'' with the same ''VerifyOpening'' function returns failure, abort.
+* Let ''s = (k + ed) mod n''.
+* If ''s⋅G &ne; R + e⋅P'', abort. (Defensive self-check.)
+* Let ''sig = bytes(R) || bytes(s)''.
 * Return ''sig''.
 
 The nonce derivation is deliberately different from BIP340 nonce derivation. Reusing the same nonce with different challenges leaks the secret key, and this scheme's challenge depends on ''q'' and ''h'' in addition to ''m''. Therefore the nonce hash uses different tags and includes ''cbytes(P)'', ''q'', ''h'', and ''m''. This prevents accidental nonce reuse between BIP340 and this scheme, and between different openings of the same public-key commitment.
