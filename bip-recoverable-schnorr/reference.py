@@ -118,6 +118,10 @@ def recoverable_verify(
     return P
 
 
+# These toy opening relations are only for test vectors. Applications must
+# define their own VerifyOpening relation and analyze opening soundness,
+# fixed-opening binding, canonical opening serialization, and collision
+# resistance of the opening hash.
 def compressed_commitment(P: Point, opening: bytes = b"") -> bytes:
     if opening != b"":
         raise ValueError("compressed commitment uses an empty opening.")
