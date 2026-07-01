@@ -51,7 +51,7 @@ where:
 
 * ''R'' is the public nonce point;
 * ''q'' is a 32-byte public-key commitment;
-* ''h'' is a 32-byte hash of the application-specific opening data;
+* ''h'' is a 32-byte hash of the application-specific opening data ''o'';
 * ''m'' is the message being signed.
 
 The verifier computes ''e'' before knowing the EC public key. Mathematically, recovery is just the Schnorr verification equation solved for ''P'':
@@ -59,7 +59,7 @@ The verifier computes ''e'' before knowing the EC public key. Mathematically, re
 : ''s⋅G = R + e⋅P''
 : ''P = e<sup>-1</sup>⋅(s⋅G - R)''
 
-The recovered public key point is accepted only if the opening data proves that it is the key committed by ''q''.
+The recovered public key point ''P'' is accepted only if the opening data ''o'' opens ''q'' to ''P''.
 
 The opening data is included in the challenge because a single commitment may intentionally have many valid openings. For example, a Merkle root commits to many leaves. Binding the signature only to the root would not bind it to a particular leaf path.
 
