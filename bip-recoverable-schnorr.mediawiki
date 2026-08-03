@@ -57,7 +57,8 @@ where:
 The verifier computes ''e'' before knowing the EC public key. Mathematically, recovery is just the Schnorr verification equation solved for ''P'':
 
 : ''s⋅G = R + e⋅P''
-: ''P = e<sup>-1</sup>⋅(s⋅G - R)''
+: ''e_inv = e<sup>-1</sup> mod n''
+: ''P = e_inv⋅(s⋅G - R)''
 
 The recovered public key point ''P'' is accepted only if the opening data ''o'' opens ''q'' to ''P''.
 
@@ -189,8 +190,8 @@ The verification algorithm ''Verify(q, o, m, sig)'' is:
 * Let ''R = lift_x(r)''; fail if that fails.
 * Let ''e = int(hash<sub>RecSchnorr/challenge</sub>(bytes(R) || q || h || m)) mod n''.
 * Fail if ''e = 0''.
-* Let ''P = e<sup>-1</sup>⋅(s⋅G - R)''.
-* The inverse in the previous step is taken modulo ''n''.
+* Let ''e_inv = e<sup>-1</sup> mod n''.
+* Let ''P = e_inv⋅(s⋅G - R)''.
 * Fail if ''is_infinite(P)''.
 * Fail if ''VerifyOpening(q, P, o)'' fails.
 * Return ''P''.
@@ -301,7 +302,8 @@ So an accepting forgery against the full scheme gives one of:
 The recovery step itself adds no new algebraic assumption. Once ''e'' is fixed and nonzero, recovery is just the Schnorr verification equation solved for ''P'':
 
 : ''s⋅G = R + e⋅P''
-: ''P = e<sup>-1</sup>⋅(s⋅G - R)''
+: ''e_inv = e<sup>-1</sup> mod n''
+: ''P = e_inv⋅(s⋅G - R)''
 
 ===Related-key attacks===
 
