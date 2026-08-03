@@ -89,7 +89,13 @@ The following tags are used:
 
 ===Public-key commitments and openings===
 
-Applications using this scheme define a deterministic function:
+Applications using this scheme have a 32-byte value ''q'' which authorizes one or more EC public key points. A spender provides opening data ''o''. Together, ''q'', ''P'', and ''o'' are meant to prove the statement:
+
+: public key point ''P'' is authorized by ''q'' using opening data ''o''.
+
+The meaning of this statement is application-specific. In a Merkle-root construction, ''q'' may be the Merkle root and ''o'' may be a Merkle path to a leaf containing ''P''. In a hash-of-key construction, ''q'' may be a hash of ''P'' and ''o'' may be empty.
+
+Applications using this scheme define a deterministic function which checks this statement:
 
 <source>
 VerifyOpening(q, P, o) -> success or failure
@@ -105,12 +111,12 @@ The function succeeds iff ''o'' proves, according to the application rules, that
 
 This BIP does not define how ''q'' is computed. That is application-specific.
 
-Applications must define what it means for an opening to be authorized under ''q''. This definition must not be circularly defined as whatever ''VerifyOpening'' accepts, otherwise opening soundness is meaningless. The opening relation must satisfy:
+The function ''VerifyOpening'' must satisfy:
 
-* Opening soundness: for all efficient adversaries, the probability of outputting ''(q, P, o)'' such that ''VerifyOpening(q, P, o)'' succeeds but the opening is not authorized under the application rules is negligible.
-* Fixed-opening binding: for all efficient adversaries, the probability of outputting ''(q, P<sub>1</sub>, P<sub>2</sub>, o)'' such that ''P<sub>1</sub> &ne; P<sub>2</sub>'' and both ''VerifyOpening(q, P<sub>1</sub>, o)'' and ''VerifyOpening(q, P<sub>2</sub>, o)'' succeed is negligible.
-
-Applications must also define a canonical byte serialization for ''o''. Verification uses that exact byte string. The opening hash ''hash<sub>RecSchnorr/opening</sub>'' is fixed by this BIP and is assumed to be collision-resistant over this serialization: it must be infeasible to find ''o<sub>1</sub> &ne; o<sub>2</sub>'' with the same opening hash.
+* Openings produced according to the application rules for authorized public keys verify.
+* For all efficient adversaries, the probability of outputting ''(q, P, o)'' such that ''VerifyOpening(q, P, o)'' succeeds but ''P'' is not authorized by ''q'' under the application rules is negligible. For Merkle-root constructions, this is the usual collision and second-preimage style security of the Merkle tree.
+* For all efficient adversaries, the probability of outputting ''(q, P<sub>1</sub>, P<sub>2</sub>, o)'' such that ''P<sub>1</sub> &ne; P<sub>2</sub>'' and both ''VerifyOpening(q, P<sub>1</sub>, o)'' and ''VerifyOpening(q, P<sub>2</sub>, o)'' succeed is negligible.
+* ''o'' must have a canonical byte encoding. Verification uses that exact byte string. The opening hash ''hash<sub>RecSchnorr/opening</sub>'' is fixed by this BIP and is assumed to be collision-resistant over this encoding: it must be infeasible to find ''o<sub>1</sub> &ne; o<sub>2</sub>'' with the same opening hash.
 
 These requirements do not require ''q'' to authorize only one public key. For example, a Merkle root may authorize many leaves. If two valid openings use different byte strings ''o<sub>1</sub>'' and ''o<sub>2</sub>'', then collision resistance of ''hash<sub>RecSchnorr/opening</sub>'' makes their Schnorr challenge labels ''q || hash<sub>RecSchnorr/opening</sub>(o<sub>1</sub>)'' and ''q || hash<sub>RecSchnorr/opening</sub>(o<sub>2</sub>)'' different except with negligible probability.
 
@@ -274,9 +280,9 @@ In this BIP, the label is:
 
 : ''L = q || hash<sub>RecSchnorr/opening</sub>(o)''
 
-This sketch assumes the opening requirements from the previous section: opening soundness, fixed-opening binding, canonical opening serialization, and collision resistance of ''hash<sub>RecSchnorr/opening</sub>''.
+This sketch assumes the opening requirements from the previous section.
 
-The application-level part is direct. If verification accepts and returns ''P<sub>r</sub>'', then the verification algorithm has checked ''VerifyOpening(q, P<sub>r</sub>, o)''. If this opening is not authorized under the application rules, opening soundness has failed. Therefore, assuming opening soundness, an accepted signature always recovers a public key point authorized by ''q''.
+The application-level part is direct. If verification accepts and returns ''P<sub>r</sub>'', then the verification algorithm has checked ''VerifyOpening(q, P<sub>r</sub>, o)''. If ''P<sub>r</sub>'' is not authorized by ''q'' under the application rules, then verification just accepted an unauthorized opening. Therefore, assuming the opening requirements above, an accepted signature always recovers a public key point authorized by ''q''.
 
 It remains to prove that producing a signature for an authorized recovered key is no easier than producing a labeled-Schnorr signature. Fix an authorized public key point ''P''. Consider an attacker ''A'' against the single-key game where signing queries are answered only for openings ''(q, o)'' with ''VerifyOpening(q, P, o)'' succeeding, and a forgery must also be for such an opening.
 
@@ -287,16 +293,16 @@ Construct an attacker ''B'' against labeled Schnorr as follows:
 * Otherwise ''B'' computes ''L = q || hash<sub>RecSchnorr/opening</sub>(o)'', asks its labeled-Schnorr signing oracle for a signature on ''(L, m)'', and returns that signature to ''A''.
 * When ''A'' outputs a forgery ''(q, o, m, sig)'', ''B'' first checks ''VerifyOpening(q, P, o)''. If it fails, this is not a forgery in the single-key game.
 * ''B'' then runs this BIP's verification algorithm. If verification fails, ''B'' fails.
-* If verification succeeds and recovers ''P<sub>r</sub>'', then ''B'' checks whether ''P<sub>r</sub> = P''. If not, then both ''VerifyOpening(q, P, o)'' and ''VerifyOpening(q, P<sub>r</sub>, o)'' succeed, so ''A'' has produced a fixed-opening binding failure for ''VerifyOpening''.
+* If verification succeeds and recovers ''P<sub>r</sub>'', then ''B'' checks whether ''P<sub>r</sub> = P''. If not, then both ''VerifyOpening(q, P, o)'' and ''VerifyOpening(q, P<sub>r</sub>, o)'' succeed for the same ''(q, o)'' and two distinct public key points.
 * Otherwise ''P<sub>r</sub> = P''. Then the same signature satisfies the labeled-Schnorr verification equation for public key point ''P'', label ''L = q || hash<sub>RecSchnorr/opening</sub>(o)'', and message ''m''.
 * If ''A'' did not request a signature for this ''(L, m)'' before, or if it outputs a different valid signature for a previously requested ''(L, m)'', then ''B'' has a labeled-Schnorr forgery under the usual strong unforgeability notion used by BIP340.
 * If ''A'' did request this ''(L, m)'' before but not this ''(q, o, m)'', then two different openings produced the same label. That requires either a collision in ''hash<sub>RecSchnorr/opening</sub>'' or non-canonical opening encodings.
 
 So an accepting forgery against the full scheme gives one of:
 
-* an opening soundness violation, if the recovered key is not authorized under the application rules;
+* an accepted opening to a public key not authorized by ''q'' under the application rules;
 * a labeled-Schnorr forgery under the authorized recovered public key point;
-* a fixed-opening binding violation for ''VerifyOpening''; or
+* two distinct public key points accepted for the same ''(q, o)''; or
 * an opening-hash collision or non-canonical opening encoding.
 
 The recovery step itself adds no new algebraic assumption. Once ''e'' is fixed and nonzero, recovery is just the Schnorr verification equation solved for ''P'':
@@ -315,7 +321,7 @@ BIP340 prevents this by putting ''P'' into the challenge hash. This scheme inste
 
 into the challenge hash.
 
-For a fixed opening, fixed-opening binding ensures that the label identifies one public key. For different openings, challenge separation relies on collision resistance of ''hash<sub>RecSchnorr/opening</sub>'' and canonical serialization of ''o''.
+For a fixed opening, the requirements above ensure that the label identifies one public key. For different openings, challenge separation relies on collision resistance of ''hash<sub>RecSchnorr/opening</sub>'' and canonical encoding of ''o''.
 
 If two openings use different labels, then their challenge inputs differ. It is enough for ''q'', ''h'', or both to be different:
 
