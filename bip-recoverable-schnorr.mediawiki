@@ -204,9 +204,9 @@ For every valid secret key ''sk'', commitment ''q'', opening data ''o'', and mes
 
 The opening data ''o'' is part of the signing context, through ''h = hash<sub>RecSchnorr/opening</sub>(o)''. It is not free-form metadata you can vary after the fact.
 
-The signer needs to know the exact byte string ''o'' before signing and must check that it opens ''q'' to their own public key. Signing for the wrong opening data can either produce an invalid signature or, if nonces are reused across openings, leak the secret key.
+The signer needs to know the exact byte string ''o'' before signing and must check that it opens ''q'' to their own public key. Signing for the wrong opening data can produce an invalid signature.
 
-===Do not reuse deterministic nonces across schemes===
+===Nonce derivation differs from BIP340===
 
 If the same nonce is used for two challenges ''e<sub>1</sub>'' and ''e<sub>2</sub>'', the secret key can be recovered from:
 
@@ -214,7 +214,7 @@ If the same nonce is used for two challenges ''e<sub>1</sub>'' and ''e<sub>2</su
 : ''s<sub>2</sub> = k + e<sub>2</sub>⋅d''
 : ''d = (s<sub>1</sub> - s<sub>2</sub>) / (e<sub>1</sub> - e<sub>2</sub>) mod n''
 
-The signing algorithm above includes ''cbytes(P)'', ''q'', ''h'', and ''m'' in the nonce hash and uses scheme-specific tags. Implementations using another nonce generation method must provide the same protection.
+The signing algorithm above uses scheme-specific tags and includes ''cbytes(P)'', ''q'', ''h'', and ''m'' in the nonce hash. This is intentionally different from BIP340 nonce derivation. It prevents accidental nonce reuse between BIP340 and this scheme, and between different openings of the same public-key commitment. Implementations using another nonce generation method must provide the same protection.
 
 ===Public key encoding and parity===
 
